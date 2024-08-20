@@ -1,0 +1,338 @@
+<html><head><base href="https://inventario-app-mobile.es/"><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"><title>Control de Inventario - Ferretería</title>
+<style>
+    body {
+        font-family: 'Arial', sans-serif;
+        margin: 0;
+        padding: 10px;
+        background-color: #f0f4f8;
+        font-size: 16px;
+    }
+    .container {
+        max-width: 100%;
+        background-color: #ffffff;
+        padding: 15px;
+        border-radius: 8px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    h1, h2 {
+        color: #2c3e50;
+        text-align: center;
+        font-size: 1.5em;
+        margin-bottom: 15px;
+    }
+    table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 15px;
+        font-size: 0.9em;
+    }
+    th, td {
+        border: 1px solid #ddd;
+        padding: 8px;
+        text-align: left;
+    }
+    th {
+        background-color: #3498db;
+        color: white;
+    }
+    input[type="text"], input[type="number"] {
+        width: 100%;
+        padding: 10px;
+        margin: 5px 0;
+        box-sizing: border-box;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+    }
+    button {
+        background-color: #2ecc71;
+        color: white;
+        padding: 12px 15px;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 1em;
+        margin-top: 10px;
+        width: 100%;
+    }
+    button:hover {
+        background-color: #27ae60;
+    }
+    #scanButton {
+        background-color: #3498db;
+        display: block;
+        margin: 10px 0;
+    }
+    #scanButton:hover {
+        background-color: #2980b9;
+    }
+    #videoContainer {
+        display: none;
+        margin-top: 15px;
+    }
+    #video {
+        width: 100%;
+        max-width: 100%;
+        height: auto;
+    }
+    .form-group {
+        margin-bottom: 15px;
+    }
+    #filtroProducto {
+        width: 100%;
+        padding: 10px;
+        margin-bottom: 15px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+    }
+    .producto-seleccionado {
+        background-color: #e0f7fa;
+    }
+    #inventarioTabla {
+        overflow-x: auto;
+    }
+    #exportarButton {
+        background-color: #f39c12;
+        margin-top: 15px;
+    }
+    #exportarButton:hover {
+        background-color: #e67e22;
+    }
+</style>
+</head><body>
+<div class="container">
+    <h1>Control de Inventario - Ferretería</h1>
+    
+    <button id="scanButton">Escanear Código de Barras</button>
+    <div id="videoContainer">
+        <video id="video" autoplay playsinline></video>
+    </div>
+    
+    <h2>Actualizar Existencias</h2>
+    <input type="text" id="filtroProducto" placeholder="Buscar por código o nombre">
+    
+    <div id="productoSeleccionado" style="display: none;">
+        <h3>Producto Seleccionado</h3>
+        <p id="productoInfo"></p>
+        <div class="form-group">
+            <label for="nuevaExistencia">Nueva Existencia:</label>
+            <input type="number" id="nuevaExistencia" min="0" required>
+        </div>
+        <button id="actualizarExistencia">Actualizar Existencia</button>
+    </div>
+
+    <div id="inventarioTabla">
+        <table>
+            <thead>
+                <tr>
+                    <th>Código</th>
+                    <th>Nombre</th>
+                    <th>Stock</th>
+                </tr>
+            </thead>
+            <tbody></tbody>
+        </table>
+    </div>
+
+    <button id="exportarButton">Exportar a CSV</button>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/quagga@0.12.1/dist/quagga.min.js"></script>
+<script>
+    let stream;
+    const videoContainer = document.getElementById('videoContainer');
+    const video = document.getElementById('video');
+    const scanButton = document.getElementById('scanButton');
+    const filtroProducto = document.getElementById('filtroProducto');
+    const productoSeleccionado = document.getElementById('productoSeleccionado');
+    const productoInfo = document.getElementById('productoInfo');
+    const nuevaExistencia = document.getElementById('nuevaExistencia');
+    const actualizarExistenciaBtn = document.getElementById('actualizarExistencia');
+    const exportarButton = document.getElementById('exportarButton');
+    let productoActual = null;
+
+    scanButton.addEventListener('click', iniciarEscaneo);
+    filtroProducto.addEventListener('input', filtrarProductos);
+    actualizarExistenciaBtn.addEventListener('click', actualizarExistencia);
+    exportarButton.addEventListener('click', exportarCSV);
+
+    async function iniciarEscaneo() {
+        try {
+            stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+            video.srcObject = stream;
+            videoContainer.style.display = 'block';
+            scanButton.textContent = 'Detener Escaneo';
+            scanButton.removeEventListener('click', iniciarEscaneo);
+            scanButton.addEventListener('click', detenerEscaneo);
+
+            Quagga.init({
+                inputStream: {
+                    name: "Live",
+                    type: "LiveStream",
+                    target: video,
+                    constraints: {
+                        facingMode: "environment"
+                    },
+                },
+                decoder: {
+                    readers: ["ean_reader", "ean_8_reader", "code_128_reader"]
+                }
+            }, function(err) {
+                if (err) {
+                    console.log(err);
+                    alert("Error al iniciar el escáner. Por favor, asegúrese de que tiene permiso para usar la cámara.");
+                    return;
+                }
+                console.log("Escáner iniciado correctamente");
+                Quagga.start();
+            });
+
+            Quagga.onDetected(function(result) {
+                var code = result.codeResult.code;
+                filtroProducto.value = code;
+                filtrarProductos();
+                detenerEscaneo();
+            });
+        } catch (err) {
+            console.error("Error al acceder a la cámara:", err);
+            alert("No se pudo acceder a la cámara. Por favor, asegúrese de que tiene permiso para usarla.");
+        }
+    }
+
+    function detenerEscaneo() {
+        if (stream) {
+            stream.getTracks().forEach(track => track.stop());
+        }
+        Quagga.stop();
+        videoContainer.style.display = 'none';
+        scanButton.textContent = 'Escanear Código de Barras';
+        scanButton.removeEventListener('click', detenerEscaneo);
+        scanButton.addEventListener('click', iniciarEscaneo);
+    }
+
+    function filtrarProductos() {
+        const filtro = filtroProducto.value.toLowerCase();
+        const filas = document.querySelectorAll('#inventarioTabla tbody tr');
+        let productoEncontrado = null;
+
+        filas.forEach(fila => {
+            const codigo = fila.cells[0].textContent.toLowerCase();
+            const nombre = fila.cells[1].textContent.toLowerCase();
+            if (codigo.includes(filtro) || nombre.includes(filtro)) {
+                fila.style.display = '';
+                if (!productoEncontrado) {
+                    productoEncontrado = fila;
+                }
+            } else {
+                fila.style.display = 'none';
+            }
+        });
+
+        if (productoEncontrado) {
+            seleccionarProducto(productoEncontrado);
+        } else {
+            ocultarProductoSeleccionado();
+        }
+    }
+
+    function seleccionarProducto(fila) {
+        document.querySelectorAll('#inventarioTabla tbody tr').forEach(tr => {
+            tr.classList.remove('producto-seleccionado');
+        });
+
+        fila.classList.add('producto-seleccionado');
+
+        productoActual = {
+            codigo: fila.cells[0].textContent,
+            nombre: fila.cells[1].textContent,
+            stock: fila.cells[2].textContent
+        };
+
+        productoInfo.textContent = `${productoActual.nombre} - Stock actual: ${productoActual.stock}`;
+        nuevaExistencia.value = productoActual.stock;
+        productoSeleccionado.style.display = 'block';
+    }
+
+    function ocultarProductoSeleccionado() {
+        productoSeleccionado.style.display = 'none';
+        productoActual = null;
+    }
+
+    function actualizarExistencia() {
+        if (!productoActual) {
+            alert('Por favor, seleccione un producto primero.');
+            return;
+        }
+
+        const nuevoStock = parseInt(nuevaExistencia.value);
+        if (isNaN(nuevoStock) || nuevoStock < 0) {
+            alert('Por favor, ingrese una cantidad válida.');
+            return;
+        }
+
+        const filas = document.querySelectorAll('#inventarioTabla tbody tr');
+        filas.forEach(fila => {
+            if (fila.cells[0].textContent === productoActual.codigo) {
+                fila.cells[2].textContent = nuevoStock;
+                productoActual.stock = nuevoStock;
+            }
+        });
+
+        productoInfo.textContent = `${productoActual.nombre} - Stock actualizado: ${nuevoStock}`;
+        alert('Existencia actualizada con éxito.');
+    }
+
+    function agregarProducto(codigo, nombre, stock) {
+        var tabla = document.querySelector('#inventarioTabla tbody');
+        var nuevaFila = tabla.insertRow();
+        nuevaFila.innerHTML = `
+            <td>${codigo}</td>
+            <td>${nombre}</td>
+            <td>${stock}</td>
+        `;
+    }
+
+    function exportarCSV() {
+        var tabla = document.querySelector('#inventarioTabla table');
+        var filas = tabla.getElementsByTagName('tr');
+        var csv = [];
+
+        for (var i = 0; i < filas.length; i++) {
+            var fila = [], cols = filas[i].querySelectorAll('td, th');
+            
+            for (var j = 0; j < cols.length; j++) {
+                fila.push(cols[j].innerText);
+            }
+            
+            csv.push(fila.join(","));        
+        }
+
+        var csvFile = new Blob([csv.join("\n")], {type: "text/csv;charset=utf-8;"});
+        var downloadLink = document.createElement("a");
+        var url = URL.createObjectURL(csvFile);
+        downloadLink.href = url;
+        downloadLink.download = "inventario.csv";
+
+        document.body.appendChild(downloadLink);
+        downloadLink.click();
+        document.body.removeChild(downloadLink);
+    }
+
+    // Agregar 10 productos de muestra
+    const productosMuestra = [
+        {codigo: "MRT001", nombre: "Martillo de carpintero", stock: 50},
+        {codigo: "DST002", nombre: "Destornillador Phillips", stock: 100},
+        {codigo: "LLV003", nombre: "Llave ajustable 10\"", stock: 30},
+        {codigo: "TRN004", nombre: "Taladro eléctrico 600W", stock: 15},
+        {codigo: "PNT005", nombre: "Pintura látex blanca 4L", stock: 40},
+        {codigo: "CIN006", nombre: "Cinta métrica 5m", stock: 75},
+        {codigo: "SIL007", nombre: "Silicona multiusos 280ml", stock: 60},
+        {codigo: "SIE008", nombre: "Sierra circular 1200W", stock: 10},
+        {codigo: "TOR009", nombre: "Juego de tornillos surtidos", stock: 25},
+        {codigo: "ESC010", nombre: "Escalera de aluminio 5 peldaños", stock: 20}
+    ];
+
+    productosMuestra.forEach(producto => {
+        agregarProducto(producto.codigo, producto.nombre, producto.stock);
+    });
+</script>
+</body></html>
